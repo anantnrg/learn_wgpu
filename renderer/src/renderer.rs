@@ -1,7 +1,15 @@
+use wgpu::util::DeviceExt;
 use winit::{
 	event::WindowEvent,
 	window::Window,
 };
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Vertex {
+	pub position: [f32; 2],
+	pub color: [f32; 3],
+}
 
 pub struct RendererState {
 	pub surface: wgpu::Surface,
@@ -10,8 +18,16 @@ pub struct RendererState {
 	pub config: wgpu::SurfaceConfiguration,
 	pub size: winit::dpi::PhysicalSize<u32>,
 	pub render_pipeline: wgpu::RenderPipeline,
+	pub vertex_buffer: wgpu::Buffer,
+	pub num_vertices: u32,
 	pub window: Window,
 }
+
+const VERTICES: &[Vertex] = &[
+	Vertex { position: [0.0, 0.5], color: [1.0, 0.0, 0.0] },
+	Vertex { position: [-0.5, -0.5], color: [0.0, 1.0, 0.0] },
+	Vertex { position: [0.5, -0.5], color: [0.0, 0.0, 1.0] },
+];
 
 impl RendererState {
 	pub async fn new(window: Window) -> Self {
@@ -77,7 +93,11 @@ impl RendererState {
 		let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
 			label: Some("Render Pipeline"),
 			layout: Some(&render_pipeline_layout),
-			vertex: wgpu::VertexState { module: &shader, entry_point: "vs_main", buffers: &[] },
+			vertex: wgpu::VertexState {
+				module: &shader,
+				entry_point: "vs_main",
+				buffers: &[Vertex::desc()],
+			},
 			fragment: Some(wgpu::FragmentState {
 				module: &shader,
 				entry_point: "fs_main",
@@ -95,7 +115,7 @@ impl RendererState {
 				strip_index_format: None,
 				front_face: wgpu::FrontFace::Cw,
 				cull_mode: None,
-				polygon_mode: wgpu::PolygonMode::Line,
+				polygon_mode: wgpu::PolygonMode::Fill,
 				unclipped_depth: false,
 				conservative: false,
 			},
@@ -108,7 +128,13 @@ impl RendererState {
 			multiview: None,
 		});
 
-		Self { window, surface, device, queue, config, size, render_pipeline }
+		let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+			label: Some("Vertex Buffer"),
+			contents: bytemuck::cast_slice(VERTICES),
+			usage: wgpu::BufferUsages::VERTEX,
+		});
+
+		Self { window, surface, device, queue, config, size, render_pipeline, vertex_buffer }
 	}
 
 	pub fn window(&self) -> &Window {
@@ -137,7 +163,7 @@ impl RendererState {
 			label: Some("Render Encoder"),
 		});
 		{
-			let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+			let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
 				label: Some("Render Pass"),
 				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
 					view: &view,
@@ -149,12 +175,36 @@ impl RendererState {
 				})],
 				depth_stencil_attachment: None,
 			});
+
+			render_pass.set_pipeline(&self.render_pipeline);
+			render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+			render_pass.draw(0..3, 0..1);
 		}
 
-		// submit will accept anything that implements IntoIter
 		self.queue.submit(std::iter::once(encoder.finish()));
 		output.present();
 
 		Ok(())
+	}
+}
+
+impl Vertex {
+	fn desc() -> wgpu::VertexBufferLayout<'static> {
+		wgpu::VertexBufferLayout {
+			array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+			step_mode: wgpu::VertexStepMode::Vertex,
+			attributes: &[
+				wgpu::VertexAttribute {
+					offset: 0,
+					shader_location: 0,
+					format: wgpu::VertexFormat::Float32x3,
+				},
+				wgpu::VertexAttribute {
+					offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+					shader_location: 1,
+					format: wgpu::VertexFormat::Float32x3,
+				},
+			],
+		}
 	}
 }
