@@ -7,7 +7,7 @@ use winit::{
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
-	pub position: [f32; 2],
+	pub position: [f32; 3],
 	pub color: [f32; 3],
 }
 
@@ -24,9 +24,10 @@ pub struct RendererState {
 }
 
 const VERTICES: &[Vertex] = &[
-	Vertex { position: [0.0, 0.5], color: [1.0, 0.0, 0.0] },
-	Vertex { position: [-0.5, -0.5], color: [0.0, 1.0, 0.0] },
-	Vertex { position: [0.5, -0.5], color: [0.0, 0.0, 1.0] },
+	Vertex { position: [-0.4, 0.2, 0.0], color: [1.0, 0.0, 0.0] },
+	Vertex { position: [0.4, 0.2, 0.0], color: [1.0, 0.0, 0.0] },
+	Vertex { position: [0.4, -0.2, 0.0], color: [1.0, 0.0, 0.0] },
+	Vertex { position: [-0.4, -0.2, 0.0], color: [1.0, 0.0, 0.0] },
 ];
 
 impl RendererState {
@@ -133,8 +134,19 @@ impl RendererState {
 			contents: bytemuck::cast_slice(VERTICES),
 			usage: wgpu::BufferUsages::VERTEX,
 		});
+		let num_vertices = VERTICES.len() as u32;
 
-		Self { window, surface, device, queue, config, size, render_pipeline, vertex_buffer }
+		Self {
+			window,
+			surface,
+			device,
+			queue,
+			config,
+			size,
+			render_pipeline,
+			vertex_buffer,
+			num_vertices,
+		}
 	}
 
 	pub fn window(&self) -> &Window {
@@ -178,7 +190,7 @@ impl RendererState {
 
 			render_pass.set_pipeline(&self.render_pipeline);
 			render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-			render_pass.draw(0..3, 0..1);
+			render_pass.draw(0..self.num_vertices, 0..1);
 		}
 
 		self.queue.submit(std::iter::once(encoder.finish()));
