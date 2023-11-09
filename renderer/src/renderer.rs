@@ -1,3 +1,4 @@
+use wgpu::util::DeviceExt;
 use winit::{
 	event::WindowEvent,
 	window::Window,
@@ -9,7 +10,43 @@ pub struct RendererState {
 	pub queue: wgpu::Queue,
 	pub surface_config: wgpu::SurfaceConfiguration,
 	pub size: winit::dpi::PhysicalSize<u32>,
+	pub render_pipeline: wgpu::RenderPipeline,
+	pub vertex_buffer: wgpu::Buffer,
 	pub window: Window,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct Vertex {
+	position: [f32; 3],
+	color: [f32; 3],
+}
+
+const VERTICES: &[Vertex] = &[
+	Vertex { position: [0.0, 0.5, 0.0], color: [1.0, 0.0, 0.0] },
+	Vertex { position: [-0.5, -0.5, 0.0], color: [0.0, 1.0, 0.0] },
+	Vertex { position: [0.5, -0.5, 0.0], color: [0.0, 0.0, 1.0] },
+];
+
+impl Vertex {
+	fn desc() -> wgpu::VertexBufferLayout<'static> {
+		wgpu::VertexBufferLayout {
+			array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+			step_mode: wgpu::VertexStepMode::Vertex,
+			attributes: &[
+				wgpu::VertexAttribute {
+					offset: 0,
+					shader_location: 0,
+					format: wgpu::VertexFormat::Float32x3,
+				},
+				wgpu::VertexAttribute {
+					offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+					shader_location: 1,
+					format: wgpu::VertexFormat::Float32x3,
+				},
+			],
+		}
+	}
 }
 
 impl RendererState {
@@ -53,6 +90,7 @@ impl RendererState {
 			.copied()
 			.find(|f| f.is_srgb())
 			.unwrap_or(surface_caps.formats[0]);
+
 		let surface_config = wgpu::SurfaceConfiguration {
 			usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
 			format: surface_format,
@@ -64,7 +102,66 @@ impl RendererState {
 		};
 		surface.configure(&device, &surface_config);
 
-		Self { window, surface, device, queue, surface_config, size }
+		let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/shader.wgsl"));
+
+		let render_pipeline_layout =
+			device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+				label: Some("render_pipeline_layout"),
+				bind_group_layouts: &[],
+				push_constant_ranges: &[],
+			});
+
+		let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+			label: Some("render_pipeline"),
+			layout: Some(&render_pipeline_layout),
+			vertex: wgpu::VertexState {
+				module: &shader,
+				entry_point: "vs_main",
+				buffers: &[Vertex::desc()],
+			},
+			fragment: Some(wgpu::FragmentState {
+				module: &shader,
+				entry_point: "fs_main",
+				targets: &[Some(wgpu::ColorTargetState {
+					format: surface_config.format,
+					blend: Some(wgpu::BlendState::REPLACE),
+					write_mask: wgpu::ColorWrites::ALL,
+				})],
+			}),
+			primitive: wgpu::PrimitiveState {
+				topology: wgpu::PrimitiveTopology::TriangleList,
+				strip_index_format: None,
+				front_face: wgpu::FrontFace::Cw,
+				cull_mode: None,
+				unclipped_depth: false,
+				polygon_mode: wgpu::PolygonMode::Fill,
+				conservative: false,
+			},
+			depth_stencil: None,
+			multisample: wgpu::MultisampleState {
+				count: 1,
+				mask: !0,
+				alpha_to_coverage_enabled: false,
+			},
+			multiview: None,
+		});
+
+		let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+			label: Some("vertex_buffer"),
+			contents: bytemuck::cast_slice(VERTICES),
+			usage: wgpu::BufferUsages::VERTEX,
+		});
+
+		Self {
+			window,
+			surface,
+			device,
+			queue,
+			surface_config,
+			size,
+			render_pipeline,
+			vertex_buffer,
+		}
 	}
 
 	pub fn window(&self) -> &Window {
@@ -95,7 +192,7 @@ impl RendererState {
 		});
 
 		{
-			let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+			let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
 				label: Some("render_pass"),
 				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
 					view: &view,
@@ -112,6 +209,10 @@ impl RendererState {
 				})],
 				depth_stencil_attachment: None,
 			});
+
+			render_pass.set_pipeline(&self.render_pipeline);
+			render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+			render_pass.draw(0..3, 0..1);
 		}
 
 		self.queue.submit(std::iter::once(encoder.finish()));
