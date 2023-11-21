@@ -9,3 +9,4 @@ members = ["renderer"]
 [dependencies]
 pollster = "0.3.0"
 renderer = { path = "./renderer" }
+wgpu = { version = "0.18.0", features = ["glsl"] }
